@@ -1072,6 +1072,7 @@ class Proc {
     this.toolsSignature = JSON.stringify(opts.tools)
     this.workDir = opts.workDir
     this.instructions = opts.instructions || ""
+    this.openingText = openingTextOf(opts.messages?.[0])
     this.resumeFrom = opts.resume || null
     this.token = randomUUID()
     this.sessionId = null
@@ -2177,10 +2178,13 @@ async function acquireProcLocked(agyPath, convKey, opts, isFreshConversation, fo
         matchedHistory = opts.messages.slice(0, k)
       }
     }
+    const continuedFresh = isFreshConversation && existing.hasSentFirstTurn &&
+      isContinuedOpening(existing, Array.isArray(opts.messages) ? opts.messages[0] : null)
     const compatible = !forceNew && !existing.dead && !existing.retiring &&
       existing.workDir === opts.workDir && sameInstructions(existing.instructions, opts.instructions) &&
-      existing.matchesHistory(matchedHistory)
-    if (compatible && !(isFreshConversation && existing.hasSentFirstTurn)) {
+      (existing.matchesHistory(matchedHistory) || continuedFresh)
+    if (compatible && (!(isFreshConversation && existing.hasSentFirstTurn) || continuedFresh)) {
+      if (continuedFresh) existing.openingText = openingTextOf(opts.messages?.[0]) || existing.openingText
       await existing.updateTools(opts.tools)
       return { proc: existing, history: matchedHistory }
     }
@@ -2490,6 +2494,64 @@ function stripMagpiePlaceholderNotice(text) {
 
 // Compare conversation content, not transport metadata or client-assigned IDs.
 // Keep argument values, result contents and internal whitespace significant.
+
+// Normalize agent-injected lines that change every turn (clocks, Claude Code
+// billing headers) so conversationKey and matchesHistory stay stable when
+// the first message or system prompt only differs by those fields.
+function stripVolatileOpening(text) {
+  let s = String(text ?? "")
+  s = s.replace(/^[^\n]*x-anthropic-billing-header:[^\n]*\n?/gmi, "")
+  s = s.replace(/\bcch=[0-9a-fA-F]+;?/g, "")
+  s = s.replace(/^(?:#{1,6}\s*)?(?:current\s+)?(?:date|time|datetime|today|now)\s*[:：][^\n]*$/gmi, "")
+  s = s.replace(/\b20\d{2}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?/g, "")
+  s = s.replace(/\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4}(?:\s+\d{2}:\d{2}(?::\d{2})?)?/gi, "")
+  return s
+}
+
+function openingTextOf(message) {
+  if (!message) return ""
+  return compactIdentity(stripVolatileOpening(contentText(message.content)))
+}
+
+function isContinuedOpening(proc, firstMessage) {
+  const prev = proc?.openingText || ""
+  const cur = openingTextOf(firstMessage)
+  if (!prev || !cur || cur === prev) return false
+  if (cur.startsWith(prev) && cur.length > prev.length + 4) return true
+  const n = Math.min(8192, prev.length, cur.length)
+  return n >= 2048 && cur.slice(0, n) === prev.slice(0, n) && cur.length > prev.length
+}
+
+// Keep non-text first-message blocks (images, tools, documents) in the
+// conversation key, but hash only a fixed-size stripped prefix of the text
+// so later assistant turns and a flattened growing opening stay stable.
+function prefixFirstMessage(message, limit = 8192) {
+  if (!message) return message
+  const role = message.role || "user"
+  const content = message.content
+  if (typeof content === "string") {
+    return { role, content: stripVolatileOpening(content).slice(0, limit) }
+  }
+  if (!Array.isArray(content)) {
+    return { role, content: stripVolatileOpening(contentText(content)).slice(0, limit) }
+  }
+  const out = []
+  let used = 0
+  for (const block of content) {
+    if (typeof block === "string" || block?.type === "text") {
+      const raw = typeof block === "string" ? block : (block.text || "")
+      const text = stripVolatileOpening(raw)
+      const slice = used >= limit ? "" : text.slice(0, limit - used)
+      used += text.length
+      if (typeof block === "string") out.push(slice)
+      else out.push({ ...block, text: slice })
+    } else {
+      out.push(block)
+    }
+  }
+  return { role, content: out }
+}
+
 function historyKey(messages) {
   const rows = []
   const ids = new Map()
@@ -2501,7 +2563,7 @@ function historyKey(messages) {
         block.type === "tool_addition" || block.type === "tool_removal") continue
       let value
       if (typeof block === "string" || block.type === "text") {
-        value = { type: "text", text: stripMagpiePlaceholderNotice(typeof block === "string" ? block : block.text || "") }
+        value = { type: "text", text: stripVolatileOpening(stripMagpiePlaceholderNotice(typeof block === "string" ? block : block.text || "")) }
       } else if (block.type === "document") {
         value = { type: "text", text: parseUserDocumentText(block) }
       } else if (block.type === "search_result") {
@@ -2677,7 +2739,7 @@ function compactIdentity(text) {
 }
 
 function sameInstructions(a, b) {
-  return compactIdentity(a) === compactIdentity(b)
+  return compactIdentity(stripVolatileOpening(a)) === compactIdentity(stripVolatileOpening(b))
 }
 
 // The model is not part of the key: agy switches models inside a live session.
@@ -2685,7 +2747,14 @@ function conversationKey(rawBody) {
   const body = canonicalBody(rawBody)
   const system = historyKey([{ role: "system", content: compactIdentity(systemText(body)) }])
   const first = body.messages?.[0]
-  const firstText = first ? historyKey([first]) : ""
+  // Always hash the same opening of the first user message, with or without
+  // later assistant turns. A first-turn-only text slice would miss the
+  // second turn once history is attached, and would also drop images from
+  // the key so two picture turns with the same caption would collide.
+  // A flattened growing first message stays stable once the text already
+  // fills the prefix window.
+  const firstForKey = first ? prefixFirstMessage(first, 8192) : first
+  const firstText = firstForKey ? historyKey([firstForKey]) : ""
   const discriminator = body.metadata?.user_id || ""
   const source = discriminator + "\n" + system + "\n===\n" + firstText
   return createHash("sha256").update(source).digest("hex")
