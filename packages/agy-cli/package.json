@@ -9,6 +9,7 @@
   },
   "files": [
     "index.mjs",
+    "re2-pattern.mjs",
     "opencode.mjs",
     "opencode2.mjs",
     "platform.mjs",
