@@ -6,6 +6,7 @@
 - **适配范围**：Cursor 3.28.x ～ 3.30.8（已实测），Apple Silicon macOS
 - **与上游的关系**：基于 [nodlles/magpie-agent-cursor-bridge](https://github.com/nodlles/magpie-agent-cursor-bridge) `v0.2.2` 与本机 fork 增补，原生核心来自 [leookun/cursor-byok v1.0.1](https://github.com/leookun/cursor-byok/tree/v1.0.1)
 - **本仓库定位**：公开增强版，GitHub topic 已标记 `magpie-plugin`；可从 Magpie 插件页安装 `github:kingchen95272025/magpie-agent-cursor-bridge-enhanced#v0.2.9`，也支持本机源码安装
+- **变更记录**：[CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -16,7 +17,8 @@
 3. [插件使用](#三插件使用)
 4. [如何开发](#四如何开发)
 5. [与原版的升级点](#五与原版的升级点)
-6. [回滚与致谢](#六回滚与致谢)
+6. [致谢与免责声明](#六致谢与免责声明)
+7. [变更记录](CHANGELOG.md)
 
 ---
 
@@ -210,7 +212,8 @@ bash "$HOME/.config/magpie/plugins/node_modules/magpie-agent-cursor-bridge/setup
 本机源码安装：
 
 ```sh
-bash "$HOME/Code/tools/magpie-agent-cursor-bridge-enhanced/setup.command"
+cd <项目目录>
+bash setup.command
 ```
 
 初始化会：
@@ -300,7 +303,7 @@ bash setup.command status    # 输出 status.json 原文
 ### 3.7 更新
 
 ```sh
-cd ~/Code/tools/magpie-agent-cursor-bridge-enhanced
+cd <项目目录>
 bash scripts/build-native.sh      # 重新编译原生桥接（约 3 分钟）
 bash setup.command                # stage 新版本并切换后台
 ```
@@ -389,17 +392,17 @@ CARGO_BUILD_JOBS=4 bash scripts/build-native.sh
 # 1. 准备一份上游源码
 git clone --branch v1.0.1 --depth 1 https://github.com/leookun/cursor-byok.git /tmp/cursor-byok-src
 cd /tmp/cursor-byok-src
-git apply ~/Code/tools/magpie-agent-cursor-bridge-enhanced/source.patch
+git apply <项目目录>/source.patch
 
 # 2. 直接编辑源码（例如 server/src/api/cursor/bidi.rs）
 
 # 3. 重新生成完整补丁
 git add -N .
-git diff > ~/Code/tools/magpie-agent-cursor-bridge-enhanced/source.patch
+git diff > <项目目录>/source.patch
 
 # 4. 在全新检出上验证补丁可应用
 git clone --branch v1.0.1 --depth 1 https://github.com/leookun/cursor-byok.git /tmp/verify
-git -C /tmp/verify apply --check ~/Code/tools/magpie-agent-cursor-bridge-enhanced/source.patch
+git -C /tmp/verify apply --check <项目目录>/source.patch
 ```
 
 改动涉及版本号时，三处必须同步：
@@ -533,13 +536,7 @@ let payload = if !request.data_binary.is_empty() {
 
 ---
 
-## 六、回滚与致谢
-
-### 回滚到上游 0.2.2
-
-```sh
-bash ~/Code/tools/magpie-agent-cursor-bridge-0.2.2-backup/setup.command
-```
+## 六、致谢与免责声明
 
 ### 致谢
 
