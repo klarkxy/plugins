@@ -3852,8 +3852,8 @@ function assistantTextOf(message) {
 // run: runStart = first message of the trailing text-only assistant run,
 // boundary = history split point (after the last assistant message before the
 // run, the session ledger's newest entry). Returns null when the request does
-// not end with a text-only assistant run. Known limits: a request combining a
-// live tool_result with a prefill tail is rejected in validateBody; a run with
+// not end with a text-only assistant run. A run that sits on a live tool_result
+// is dropped before validateBody (see dropTerminalToolResultPrefill); a run with
 // no user message before it (contiguous assistant tail, e.g. a client re-sending
 // a completed reply with a prefill appended) puts the whole run in the tail, so
 // that one turn degrades to a fresh session (safe, self-healing).
@@ -3866,6 +3866,35 @@ function prefillRun(messages) {
   let boundary = runStart
   while (boundary > 0 && messages[boundary - 1]?.role !== "assistant") boundary--
   return { runStart, boundary }
+}
+
+// A live tool turn has no slot for an assistant prefill. When prefill support
+// is on, drop a trailing run of text-only assistant messages that sits directly
+// on that turn — after its tool_result messages, and not after a later user
+// turn — then continue the tool turn. The text is discarded on purpose: it is
+// not rendered as a continuation carrier, not appended to the tool result, and
+// not written into the session ledger, so token estimates describe the body
+// that is actually sent. Contiguous text-only assistant messages are one run
+// (the same geometry as prefillRun); leaving any of them would still be a
+// prefill tail. Everything else is unchanged: a prefill with no live tool
+// result is still served, and an earlier assistant reply, text beside the
+// tool_use, and tool results stay. validateBody still rejects an unanswered
+// tool_use and a tail that is not pure text. AGY_BRIDGE_PREFILL=0 leaves the
+// tail in place so the stock 400 still applies.
+function dropTerminalToolResultPrefill(body) {
+  if (!prefillTailEnabled() || !body || typeof body !== "object") return body
+  const messages = body.messages
+  if (!Array.isArray(messages) || messages.length < 2) return body
+  const run = prefillRun(messages)
+  if (!run || run.runStart <= 0 || run.runStart >= messages.length) return body
+  const head = messages.slice(0, run.runStart)
+  let turnStart = head.length
+  while (turnStart > 0 && head[turnStart - 1]?.role !== "assistant") turnStart--
+  if (turnStart === 0 || turnStart === head.length) return body
+  const live = head.slice(turnStart).some((message) => message?.role === "user" &&
+    Array.isArray(message.content) && message.content.some((block) => block?.type === "tool_result"))
+  if (!live) return body
+  return { ...body, messages: head }
 }
 
 function renderPrefillCarrierParts(message) {
@@ -4715,6 +4744,8 @@ function validateBody(body) {
   const trailing = trailingMessages(body)
   const lastRole = body.messages.at(-1)?.role
   // A text-only assistant tail is a client-side prefill (see prefillRun).
+  // The request path drops one that sits on a live tool_result first. A body
+  // that still combines the two is rejected here.
   const prefillTail = prefillTailEnabled() && lastRole === "assistant" && assistantTextOf(body.messages.at(-1)) !== null
   const validTailRole = lastRole === "user" || lastRole === "system" || lastRole === "developer" || prefillTail
   if (prefillTail && extractToolResults(body).length) {
@@ -5942,7 +5973,10 @@ export const AntigravityBridgePlugin = async () => {
                 if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.messages)) {
                   return jsonError(400, "invalid count_tokens request")
                 }
-                return new Response(JSON.stringify({ input_tokens: estimateInputTokens(parsed) }), {
+                // Same body the messages path would send, so a dropped tool-turn
+                // prefill is not counted.
+                const counted = dropTerminalToolResultPrefill(parsed)
+                return new Response(JSON.stringify({ input_tokens: estimateInputTokens(counted) }), {
                   status: 200,
                   headers: { "Content-Type": "application/json" },
                 })
@@ -5964,7 +5998,7 @@ export const AntigravityBridgePlugin = async () => {
             let body
             try {
               const raw = typeof init.body === "string" ? init.body : new TextDecoder().decode(init.body)
-              body = JSON.parse(raw)
+              body = dropTerminalToolResultPrefill(JSON.parse(raw))
               validateBody(body)
             } catch (error) {
               return jsonError(error.statusCode ?? 400, error.message)

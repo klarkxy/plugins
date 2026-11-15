@@ -1953,6 +1953,93 @@ for (const location of ["inline", "system", "developer", "user"]) {
 }
 
 {
+  // A terminal text-only assistant prefill after a live tool_result used to 400.
+  // It is discarded; the tool turn continues. Messages and chat completions both
+  // arrive here as Anthropic messages (this provider's npm is the Anthropic
+  // adapter); string content is the chat-completions translation, text blocks
+  // are the messages translation. stream and stream:false share that body.
+  const marker = "PREFILL_MARKER_SHOULD_NOT_BE_SENT"
+  const countOf = async (messages) => {
+    const response = await loader.fetch("agy://local/v1/messages/count_tokens", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages }),
+    })
+    const payload = await response.json()
+    return { status: response.status, tokens: payload.input_tokens }
+  }
+  async function continueWithPrefill(userText, prefill, stream) {
+    const first = { model, messages: [{ role: "user", content: userText }], tools: [echoTool], ...(stream === false ? { stream: false } : {}) }
+    const opened = await callFetch(first)
+    const events = stream === false ? null : (await readSSE(opened)).events
+    const openedMsg = stream === false ? await opened.json() : null
+    const blocks = stream === false ? openedMsg.content : assistantBlocks(events)
+    const calls = blocks.filter(block => block.type === "tool_use")
+    const second = {
+      ...first,
+      ...(stream === false ? { stream: false } : {}),
+      messages: [
+        ...first.messages,
+        { role: "assistant", content: blocks.map(block => block.type === "tool_use"
+          ? { type: "tool_use", id: block.id, name: block.name, input: block.input }
+          : block) },
+        { role: "user", content: calls.map(call => ({ type: "tool_result", tool_use_id: call.id, content: "tool-output-kept" })) },
+        prefill,
+      ],
+    }
+    const before = inits().length
+    const convId = inits().at(-1).convId
+    const response = await callFetch(second)
+    let stop = null
+    if (stream === false) stop = (await response.json()).stop_reason
+    else stop = stopOf((await readSSE(response)).events)
+    const prompted = logs().filter(event => event.type === "user" && event.convId === convId).map(event => event.text).join("\n")
+    return { status: response.status, stop, before, after: inits().length, convId, mcp: mcpResultText(convId), prompted, calls }
+  }
+  const streamed = await continueWithPrefill("TOOL prefill beside result stream", { role: "assistant", content: marker }, true)
+  check("messages stream: a terminal text prefill after a tool_result continues and is not sent",
+    streamed.status === 200 && streamed.stop === "end_turn" && streamed.after === streamed.before &&
+    streamed.calls.length === 1 && streamed.mcp.includes("tool-output-kept") &&
+    !streamed.mcp.includes(marker) && !streamed.prompted.includes(marker),
+    JSON.stringify({ status: streamed.status, stop: streamed.stop, inits: [streamed.before, streamed.after], mcp: streamed.mcp }))
+  const blocking = await continueWithPrefill("TOOL prefill beside result nonstream", { role: "assistant", content: [{ type: "text", text: marker }] }, false)
+  check("messages nonstream: a terminal text prefill after a tool_result continues and is not sent",
+    blocking.status === 200 && blocking.stop === "end_turn" && blocking.after === blocking.before &&
+    blocking.calls.length === 1 && blocking.mcp.includes("tool-output-kept") &&
+    !blocking.mcp.includes(marker) && !blocking.prompted.includes(marker),
+    JSON.stringify({ status: blocking.status, stop: blocking.stop, inits: [blocking.before, blocking.after], mcp: blocking.mcp }))
+
+  const parallelFirst = { model, messages: [{ role: "user", content: "PARALLEL prefill multi result" }], tools: [echoTool] }
+  const parallelEvents = (await readSSE(await callFetch(parallelFirst))).events
+  const parallelCalls = toolCalls(parallelEvents)
+  const parallelConv = inits().at(-1).convId
+  const parallelBefore = inits().length
+  const parallelSecond = continuation(parallelFirst, parallelEvents, "multi-output-kept")
+  parallelSecond.messages.push({ role: "assistant", content: marker })
+  const parallelRes = await callFetch(parallelSecond)
+  const parallelFinal = (await readSSE(parallelRes)).events
+  const parallelPrompt = logs().filter(event => event.type === "user" && event.convId === parallelConv).map(event => event.text).join("\n")
+  check("several tool results plus a terminal text prefill continue on the live turn",
+    parallelCalls.length === 2 && parallelRes.status === 200 && stopOf(parallelFinal) === "end_turn" &&
+    inits().length === parallelBefore && mcpResultText(parallelConv).includes("multi-output-kept") &&
+    !mcpResultText(parallelConv).includes(marker) && !parallelPrompt.includes(marker),
+    JSON.stringify({ calls: parallelCalls.length, status: parallelRes.status, stop: stopOf(parallelFinal), mcp: mcpResultText(parallelConv) }))
+
+  const kept = [
+    { role: "user", content: "count the tool turn" },
+    { role: "assistant", content: [{ type: "text", text: "Looking now" }, { type: "tool_use", id: "toolu_count", name: "echo", input: { text: "a" } }] },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_count", content: "kept result" }, { type: "tool_result", tool_use_id: "toolu_count_b", content: "second result" }] },
+  ]
+  const withPrefill = [...kept, { role: "assistant", content: marker + " " + "z".repeat(2000) }]
+  const countedPrefill = await countOf(withPrefill)
+  const countedKept = await countOf(kept)
+  const countedShift = await countOf([...kept.slice(0, -1), { role: "user", content: kept.at(-1).content.concat([{ type: "text", text: "extra counted text" }]) }])
+  check("count_tokens matches the normalized tool turn and ignores the discarded prefill",
+    countedPrefill.status === 200 && countedPrefill.tokens === countedKept.tokens && countedShift.tokens > countedKept.tokens,
+    JSON.stringify({ countedPrefill, countedKept, countedShift }))
+}
+
+{
   // Claude Code Skill tool appends SKILL.md as a user text block beside tool_result.
   const skillTool = {
     name: "Skill",

@@ -93,8 +93,9 @@ MCP server. The control port listens on loopback only, with a token per process.
   happen on the client side.
 - **Assistant prefill**: requests that end with a text-only assistant message
   (SillyTavern presets, "continue"/"impersonate", bot frameworks) are served
-  instead of rejected; the session ledger stays aligned across turns. See
-  "Assistant prefill" below.
+  instead of rejected; the session ledger stays aligned across turns. A
+  text-only prefill that sits on a live tool_result is discarded and the tool
+  turn continues. See "Assistant prefill" below.
 - **Usage visibility**: Magpie shows the agy subscription usage windows. They are
   informational only; running out of quota does not block requests automatically.
 
@@ -114,11 +115,25 @@ becomes part of the current turn:
 - `AGY_BRIDGE_PREFILL=0` restores the stock 400 reject;
   `AGY_BRIDGE_PREFILL_CARRIER_NOTE` overrides the carrier's note line.
 
-Known limits: a prefill alongside a live tool_result, or directly after an
-unanswered tool_use, is still rejected; a
-contiguous assistant tail with no user message before it is treated as one
-prefill run (that turn degrades to a fresh session and self-heals on the next
-turn); the models a client gets remain agy's decision.
+A **text-only** assistant prefill that ends a request immediately after a live
+tool_result is no longer a 400. A tool turn has no prefill slot, so that
+prefill run is discarded: it is not rendered as a continuation carrier, not
+appended to the tool result, and not stored in the session ledger. Tool calls,
+tool results (including several), and earlier assistant history stay, and
+generation continues. This is intentional: the prefill text is not sent to the
+model. Contiguous text-only assistant messages are one run and are discarded
+together. A request that ends on that run loses the text, including a single
+reply that merely looks finished. A reply that is followed by a later user
+message is history and is kept. Usage is estimated from the body that remains
+after the drop.
+
+Known limits: a prefill directly after an unanswered tool_use, and a terminal
+assistant message that is not pure text (thinking, a new tool_use, or any other
+non-text block), is still rejected — those blocks are not removed. A contiguous
+assistant tail with no user message before it is treated as one prefill run
+(that turn degrades to a fresh session and self-heals on the next turn).
+`AGY_BRIDGE_PREFILL=0` restores the 400 reject for assistant tails, including
+this tool-turn shape. The models a client gets remain agy's decision.
 
 ## Requirements
 
