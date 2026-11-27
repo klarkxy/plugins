@@ -4,9 +4,9 @@
 
 中文 | [English](README.en.md) | [贡献与反馈指南](CONTRIBUTING.md) | [技术架构与交接文档](HANDOFF.md)
 
-面向 [Magpie](https://usemagpie.ai/) 与 **OpenCode** 的独立、零外部依赖 Google 模型插件（npm 包名 `magpie-antigravity`）。以 **Antigravity (RT)**（`antigravity-rt`）为核心——纯 JS 通过 Google OAuth 浏览器授权与 Refresh Token 直连 Cloud Code `v1internal` 接口，免本地二进制与 `agy` CLI 额外系统提示词开销，开箱提供 **Gemini 4**、**Claude 5.5**、**GPT-OSS**、原生工具调用、图像生成、高命中率隐式前缀缓存与每日零凭据官方协议/UA 自动同步；同时保留 **Gemini Web**（`gemini-web`）作为网页版 Cookie 补充通道。
+面向 [Magpie](https://usemagpie.ai/) 与 **OpenCode** 的独立、零外部依赖 Google 模型插件（npm 包名 `magpie-antigravity`）。以 **Antigravity**（`antigravity-rt`）为核心——纯 JS 通过 Google OAuth 浏览器授权与 Refresh Token 直连 Cloud Code `v1internal` 接口，免本地二进制与 `agy` CLI 额外系统提示词开销，开箱提供 **Gemini 4**、**Claude 5.5**、**GPT-OSS**、原生工具调用、图像生成、高命中率隐式前缀缓存与每日零凭据官方协议/UA 自动同步；同时保留 **Gemini Web**（`gemini-web`）作为网页版 Cookie 补充通道。
 
-> **独立仓库说明**：本项目已由 `P4rfa1t/magpie-Antigravity` 作为独立项目维护（不再作为分支运行），并已移除原 AI Studio (`ai-studio`) 模块，全面聚焦 **Antigravity (RT)** 直连稳定性、协议一致性与 **Gemini Web** 兼容支持。
+> **独立仓库说明**：本项目已由 `P4rfa1t/magpie-Antigravity` 作为独立项目维护（不再作为分支运行），并已移除原 AI Studio (`ai-studio`) 模块，全面聚焦 **Antigravity** 直连稳定性、协议一致性与 **Gemini Web** 兼容支持。
 
 ---
 
@@ -14,7 +14,7 @@
 
 插件导出两个相互独立、可同时启用的 Provider：
 
-| 对比项 | Antigravity (RT) (`antigravity-rt`) — **主力推荐** | Gemini Web (`gemini-web`) — 网页补充通道 |
+| 对比项 | Antigravity (`antigravity-rt`) — **主力推荐** | Gemini Web (`gemini-web`) — 网页补充通道 |
 | :--- | :--- | :--- |
 | **适用场景** | **主力对话、Coding Agent、多模型统一调度（免下载本地二进制）** | 日常对话、复用 Gemini 网页版订阅额度 |
 | **主要模型** | `gemini-4-neon`、`gemini-4-hydrogen`、`gemini-4-argon`、`gemini-3.8-flash`、`claude-opus-5-5`、`claude-sonnet-5-5`、`gpt-oss-120b-medium` 等（动态同步上游目录） | `gemini-4-hydrogen`（含免费登录账号）、`gemini-4-carbon` / `gemini-4-neon`（付费 / Ultra）、`gemini-3.6-flash`、`gemini-3.5-flash-lite` |
@@ -43,9 +43,9 @@ magpie plugin add ./magpie-Antigravity
 
 ---
 
-### 方式一：Antigravity (RT) (`antigravity-rt` — 推荐主力)
+### 方式一：Antigravity (`antigravity-rt` — 推荐主力)
 
-1. 在 Magpie 的 **「来自插件」** 区域找到 **Antigravity (RT)**（使用独立 ID，不与 Magpie 内置订阅 `Antigravity` 冲突），任选以下登录方式：
+1. 在 Magpie 的 **「来自插件」** 区域找到 **Antigravity**（使用独立 ID `antigravity-rt`，不与 Magpie 内置订阅 `Antigravity` 冲突），任选以下登录方式：
    - **「通过 Google OAuth 浏览器授权登录（推荐）」**：自动拉起本地 `http://localhost:<端口>/oauth-callback` 监听，在浏览器登录 Google 并点击允许授权后自动换取 Refresh Token 并保存账号；
    - **「通过 Google OAuth 授权（手动粘贴回调链接 / Code）」**（容器或远程环境会自动置顶）：在任意本地浏览器完成 Google 授权后，将地址栏跳转后的完整回调链接（或其中的 `code`）粘贴回 Magpie 提交；
    - **「通过 Refresh Token 登录（支持批量）」**：直接粘贴单个 `1//03...`、JSON 数组 `[{"refresh_token":"1//03..."}, ...]` 或任意含 Token 文本（兼容 Antigravity Tools / Antigravity-Manager 导出格式）。
@@ -101,7 +101,7 @@ npm run antigravity:sync-protocol                              # 零凭据本地
 ## 配置与进阶
 
 <details>
-<summary><b>⚙️ Antigravity (RT) 插件选项与环境变量</b>（全部 28 项 `antigravity.*` 配置）</summary>
+<summary><b>⚙️ Antigravity 插件选项与环境变量</b>（全部 28 项 `antigravity.*` 配置）</summary>
 
 <br>
 
@@ -157,7 +157,7 @@ npm run antigravity:sync-protocol                              # 零凭据本地
 
 <br>
 
-1. **推荐优先使用 Antigravity (RT)**：纯无头 OAuth Refresh Token 认证，不依赖本地浏览器、`127.0.0.1` 页面或外部二进制，天然适配无桌面容器与远程服务器。
+1. **推荐优先使用 Antigravity**：纯无头 OAuth Refresh Token 认证，不依赖本地浏览器、`127.0.0.1` 页面或外部二进制，天然适配无桌面容器与远程服务器。
 2. **容器内的代理地址**：bridge 网络中 `127.0.0.1` 指向容器自身而非宿主机。macOS / Windows Docker Desktop 请填 `http://host.docker.internal:<端口>`；Linux Docker 请附加 `--add-host=host.docker.internal:host-gateway` 或使用 `--network host`。
 3. **持久化与僵尸进程清理**：挂载卷并固定 `ANTIGRAVITY_DATA_DIR` 与 `GEMINI_WEB_DATA_DIR`；如运行 `gemini-web` 且 Magpie 作为容器 PID 1 启动，建议启用 Docker `--init`（Compose 设 `init: true`），插件内置 `lib/proc.mjs` 的 `Z`/`X` 僵尸进程识别也会自动兜底。
 
